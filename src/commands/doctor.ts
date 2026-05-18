@@ -1815,6 +1815,47 @@ export async function runDoctor(engine: BrainEngine | null, args: string[], dbSo
   progress.heartbeat('whoknows_health');
   checks.push(await whoknowsHealthCheck(engine));
 
+  // v0.36 cross-modal wave: modality column cleanup.
+  //
+  // Historical brains that imported image assets before v0.27.1's
+  // `modality='image'` default-set may have image chunks where
+  // embedding_image is populated but modality wasn't tagged. The cross-modal
+  // search routing in v0.36 depends on `modality` for keyword filtering;
+  // surface the gap so operators can run `gbrain backfill modality`.
+  progress.heartbeat('cross_modal_modality_backfill');
+  try {
+    const mismatchRows = await engine.executeRaw<{ count: string | number }>(
+      `SELECT COUNT(*)::text AS count FROM content_chunks
+       WHERE embedding_image IS NOT NULL
+         AND chunk_source = 'image_asset'
+         AND (modality IS NULL OR modality != 'image')`,
+    );
+    const mismatch = parseInt(String(mismatchRows[0]?.count ?? '0'), 10);
+    if (mismatch === 0) {
+      checks.push({
+        name: 'cross_modal_modality_backfill',
+        status: 'ok',
+        message: 'All image-asset chunks have modality=image',
+      });
+    } else {
+      checks.push({
+        name: 'cross_modal_modality_backfill',
+        status: 'warn',
+        message:
+          `${mismatch} image-asset chunk(s) have embedding_image populated but modality != 'image'. ` +
+          `Fix: \`gbrain backfill modality\``,
+      });
+    }
+  } catch {
+    // Engine probably doesn't have the modality column (pre-v0.27.1 brain) —
+    // skip silently. Auto-migration will land it on next upgrade.
+    checks.push({
+      name: 'cross_modal_modality_backfill',
+      status: 'ok',
+      message: 'modality column not present (pre-v0.27.1 brain); skipped',
+    });
+  }
+
   // 11. Markdown body completeness (v0.12.3 reliability wave).
   // v0.12.0's splitBody ate everything after the first `---` horizontal rule,
   // truncating wiki-style pages. Heuristic: pages whose body is <30% of the

@@ -38,6 +38,17 @@ describe('SEARCH_MODES + MODE_BUNDLES canonical shape', () => {
   // The cell-by-cell assertion. The methodology doc cites these.
   // v0.35.0.0+ extended with 5 reranker fields. tokenmax flips reranker on;
   // conservative + balanced keep it off until eval data backs a change.
+  // v0.36 cross-modal wave: shared defaults across all modes (opt-in).
+  const CROSS_MODAL_DEFAULTS = {
+    cross_modal_both_text_weight: 0.6,
+    cross_modal_both_image_weight: 0.4,
+    image_query_text_refinement_weight: 0.4,
+    image_query_image_refinement_weight: 0.6,
+    unified_multimodal: false,
+    unified_multimodal_only: false,
+    cross_modal_llm_intent: false,
+  };
+
   test('conservative bundle values are canonical', () => {
     expect(MODE_BUNDLES.conservative).toEqual({
       cache_enabled: true,
@@ -52,6 +63,7 @@ describe('SEARCH_MODES + MODE_BUNDLES canonical shape', () => {
       reranker_top_n_in: 30,
       reranker_top_n_out: null,
       reranker_timeout_ms: 5000,
+      ...CROSS_MODAL_DEFAULTS,
     });
   });
 
@@ -69,6 +81,7 @@ describe('SEARCH_MODES + MODE_BUNDLES canonical shape', () => {
       reranker_top_n_in: 30,
       reranker_top_n_out: null,
       reranker_timeout_ms: 5000,
+      ...CROSS_MODAL_DEFAULTS,
     });
   });
 
@@ -86,6 +99,7 @@ describe('SEARCH_MODES + MODE_BUNDLES canonical shape', () => {
       reranker_top_n_in: 30,
       reranker_top_n_out: null,
       reranker_timeout_ms: 5000,
+      ...CROSS_MODAL_DEFAULTS,
     });
   });
 
@@ -265,9 +279,10 @@ describe('knobsHash determinism + cross-mode separation (CDX-4)', () => {
 
   test('KNOBS_HASH_VERSION constant exposed for migrations to bump on schema change', () => {
     // v0.35.0.0+ bumped 1→2 to fold reranker fields into the cache key.
-    // CDX2-F14: a timeout change from 5s to 100ms changes search behavior
-    // (more fail-opens) so stale cache rows must invalidate.
-    expect(KNOBS_HASH_VERSION).toBe(2);
+    // v0.36 bumped 2→3 to fold 7 cross-modal knobs into the cache key (D2 fix
+    // — without this, a text-mode cache hit could silently serve to an
+    // image-mode caller).
+    expect(KNOBS_HASH_VERSION).toBe(3);
   });
 });
 

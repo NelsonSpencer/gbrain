@@ -405,6 +405,15 @@ export interface SearchResult {
   score: number;
   stale: boolean;
   /**
+   * v0.36 (cross-modal wave): the chunk's modality discriminator from
+   * content_chunks.modality. 'text' for the existing text-embedding rows,
+   * 'image' for rows populated by importImageFile. Surfaced so callers /
+   * renderers can distinguish text matches from image matches in `'both'`
+   * mode results. Optional for back-compat with engines that don't project
+   * the column (defaults to 'text' in renderers when absent).
+   */
+  modality?: 'text' | 'image';
+  /**
    * v0.18.0: the sources.id the page belongs to. Dedup composite-keys
    * on (source_id, slug) — see src/core/search/dedup.ts. Defaults to
    * 'default' for pre-v0.17 rows that lacked the column.
@@ -576,6 +585,26 @@ export interface SearchOpts {
     // Test seam — never set in production code.
     rerankerFn?: (input: { query: string; documents: string[]; topN?: number; model?: string; signal?: AbortSignal; timeoutMs?: number }) => Promise<{ index: number; relevanceScore: number }[]>;
   };
+  /**
+   * v0.36 cross-modal wave: route this search through the multimodal
+   * embedding space (Voyage multimodal-3 by default).
+   *
+   * - 'text' (default for queries that don't match image-intent regex):
+   *   existing text-embedding path. No behavior change vs pre-v0.36.
+   * - 'image': force routing through the multimodal model + embedding_image
+   *   column. Skip LLM expansion (image embeddings handle synonyms in-space)
+   *   and skip keyword search (no FTS index on image content).
+   * - 'both': run text and image vector searches in parallel; merge via
+   *   modality-weighted RRF.
+   * - 'auto' (literal): same effect as undefined — let intent classifier
+   *   decide. Accepted on the wire so MCP callers can be explicit.
+   *
+   * Cross-modal override matrix (D9): when effective modality is 'image',
+   * cross-modal path overrides expansion (false) and reranker (false)
+   * regardless of mode bundle. zerank-2 can't rerank image embeddings;
+   * sending them produces garbage scores.
+   */
+  crossModal?: 'text' | 'image' | 'both' | 'auto';
 }
 
 /**

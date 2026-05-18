@@ -1142,6 +1142,16 @@ const query: Operation = {
       description:
         "v0.34: scope search to a single source. Defaults to OperationContext.sourceId (set from CLI --source / GBRAIN_SOURCE / .gbrain-source dotfile). Pass '__all__' to force cross-source search in multi-source brains.",
     },
+    cross_modal: {
+      type: 'string',
+      enum: ['text', 'image', 'both', 'auto'],
+      description:
+        "v0.36 cross-modal search routing.\n" +
+        "  'text' (default for non-image-intent queries) — text-only path, no behavior change vs v0.35.\n" +
+        "  'image' — route the query through Voyage multimodal-3 + the embedding_image column. Best for 'show me photos of...' phrasings.\n" +
+        "  'both' — run text AND image searches in parallel; merge via weighted RRF.\n" +
+        "  'auto' — same effect as omitting the field; intent classifier decides based on query phrasing.",
+    },
   },
   handler: async (ctx, p) => {
     const startedAt = Date.now();
@@ -1219,6 +1229,8 @@ const query: Operation = {
       tokenBudget: typeof p.token_budget === 'number' ? (p.token_budget as number) : undefined,
       useCache: typeof p.use_cache === 'boolean' ? (p.use_cache as boolean) : undefined,
       intentWeighting: typeof p.intent_weighting === 'boolean' ? (p.intent_weighting as boolean) : undefined,
+      // v0.36 cross-modal routing param.
+      crossModal: p.cross_modal as 'text' | 'image' | 'both' | 'auto' | undefined,
       onMeta: (m) => { capturedMeta = m; },
       // v0.34.1 (#861 — P0 leak seal): thread caller's source scope. The
       // hybridSearch internal searchOpts rebuild (hybrid.ts:223) was

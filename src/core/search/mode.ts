@@ -94,6 +94,56 @@ export interface ModeBundle {
   reranker_top_n_out: number | null;
   /** HTTP timeout in ms (default 5000). Threaded into gateway.rerank. */
   reranker_timeout_ms: number;
+
+  // v0.36 cross-modal wave knobs (D2 + D3 + D6 + D8 + D13 + LLM-intent).
+  // All three mode bundles default these to the same values — cross-modal
+  // is opt-in per-call (D6 weighting), opt-in per-brain (D8 unified flags),
+  // and opt-in per-feature-flag (LLM intent). The mode bundle just gives
+  // resolveSearchMode a default to return.
+
+  /**
+   * D6 'both'-mode RRF weight for text-vector results when merging
+   * text + image searches in parallel. Defaults to 0.6 — biases toward
+   * text recall because most queries with ambiguous modality are still
+   * text-leaning. Pair with cross_modal_both_image_weight.
+   */
+  cross_modal_both_text_weight: number;
+  /**
+   * D6 'both'-mode RRF weight for image-vector results. Defaults to 0.4.
+   * Sum with text weight does NOT need to be 1.0 — RRF is rank-based, so
+   * weights normalize internally; the ratio is what matters.
+   */
+  cross_modal_both_image_weight: number;
+  /**
+   * D13 image-query text-refinement RRF weight for the TEXT branch of
+   * searchByImage when the caller provides an optional `query` refinement.
+   * Defaults to 0.4 (image-dominant since the caller chose image-first).
+   */
+  image_query_text_refinement_weight: number;
+  /**
+   * D13 image-query refinement RRF weight for the IMAGE branch. Defaults to 0.6.
+   */
+  image_query_image_refinement_weight: number;
+  /**
+   * D8 Phase 3 flag: route ALL queries through the multimodal query embed
+   * + `embedding_multimodal` column. Default false. Operator opt-in after
+   * `gbrain reindex --multimodal` populates the unified column.
+   */
+  unified_multimodal: boolean;
+  /**
+   * D8 Phase 3 strict mode: when true, the dual-column fallback path is
+   * bypassed entirely. Used by operators who finished re-embedding and
+   * want to commit to the unified space. Doctor surface errors when this
+   * is on and coverage < 99%.
+   */
+  unified_multimodal_only: boolean;
+  /**
+   * Commit 4: opt-in LLM tie-break for ambiguous modality classification.
+   * Default false. When true, queries where regex returns 'text' but the
+   * ambiguity heuristic fires get a Haiku call to refine the classification.
+   * Fires for <1% of queries when on; ~$0.0001 per escalation.
+   */
+  cross_modal_llm_intent: boolean;
 }
 
 /**
@@ -119,6 +169,14 @@ export const MODE_BUNDLES: Readonly<Record<SearchMode, Readonly<ModeBundle>>> = 
     reranker_top_n_in: 30,
     reranker_top_n_out: null,
     reranker_timeout_ms: 5000,
+    // v0.36 cross-modal defaults (same across all modes — opt-in)
+    cross_modal_both_text_weight: 0.6,
+    cross_modal_both_image_weight: 0.4,
+    image_query_text_refinement_weight: 0.4,
+    image_query_image_refinement_weight: 0.6,
+    unified_multimodal: false,
+    unified_multimodal_only: false,
+    cross_modal_llm_intent: false,
   }),
   balanced: Object.freeze({
     cache_enabled: true,
@@ -136,6 +194,14 @@ export const MODE_BUNDLES: Readonly<Record<SearchMode, Readonly<ModeBundle>>> = 
     reranker_top_n_in: 30,
     reranker_top_n_out: null,
     reranker_timeout_ms: 5000,
+    // v0.36 cross-modal defaults
+    cross_modal_both_text_weight: 0.6,
+    cross_modal_both_image_weight: 0.4,
+    image_query_text_refinement_weight: 0.4,
+    image_query_image_refinement_weight: 0.6,
+    unified_multimodal: false,
+    unified_multimodal_only: false,
+    cross_modal_llm_intent: false,
   }),
   tokenmax: Object.freeze({
     cache_enabled: true,
@@ -155,6 +221,14 @@ export const MODE_BUNDLES: Readonly<Record<SearchMode, Readonly<ModeBundle>>> = 
     reranker_top_n_in: 30,
     reranker_top_n_out: null,
     reranker_timeout_ms: 5000,
+    // v0.36 cross-modal defaults
+    cross_modal_both_text_weight: 0.6,
+    cross_modal_both_image_weight: 0.4,
+    image_query_text_refinement_weight: 0.4,
+    image_query_image_refinement_weight: 0.6,
+    unified_multimodal: false,
+    unified_multimodal_only: false,
+    cross_modal_llm_intent: false,
   }),
 });
 
@@ -186,6 +260,14 @@ export interface SearchKeyOverrides {
   // number | undefined.
   reranker_top_n_out?: number | null;
   reranker_timeout_ms?: number;
+  // v0.36 cross-modal overrides
+  cross_modal_both_text_weight?: number;
+  cross_modal_both_image_weight?: number;
+  image_query_text_refinement_weight?: number;
+  image_query_image_refinement_weight?: number;
+  unified_multimodal?: boolean;
+  unified_multimodal_only?: boolean;
+  cross_modal_llm_intent?: boolean;
 }
 
 /**
@@ -209,6 +291,14 @@ export interface SearchPerCallOpts {
   reranker_top_n_in?: number;
   reranker_top_n_out?: number | null;
   reranker_timeout_ms?: number;
+  // v0.36 cross-modal per-call overrides
+  cross_modal_both_text_weight?: number;
+  cross_modal_both_image_weight?: number;
+  image_query_text_refinement_weight?: number;
+  image_query_image_refinement_weight?: number;
+  unified_multimodal?: boolean;
+  unified_multimodal_only?: boolean;
+  cross_modal_llm_intent?: boolean;
 }
 
 /**
@@ -267,6 +357,14 @@ export function resolveSearchMode(input: ResolveSearchModeInput): ResolvedSearch
     reranker_top_n_in: pick('reranker_top_n_in'),
     reranker_top_n_out: pick('reranker_top_n_out'),
     reranker_timeout_ms: pick('reranker_timeout_ms'),
+    // v0.36 cross-modal knobs
+    cross_modal_both_text_weight: pick('cross_modal_both_text_weight'),
+    cross_modal_both_image_weight: pick('cross_modal_both_image_weight'),
+    image_query_text_refinement_weight: pick('image_query_text_refinement_weight'),
+    image_query_image_refinement_weight: pick('image_query_image_refinement_weight'),
+    unified_multimodal: pick('unified_multimodal'),
+    unified_multimodal_only: pick('unified_multimodal_only'),
+    cross_modal_llm_intent: pick('cross_modal_llm_intent'),
     resolved_mode,
     mode_valid: valid,
   };
@@ -327,7 +425,12 @@ export function attributeKnob<K extends keyof ModeBundle>(
 // row IDs. Expect a temporary hit-rate dip + cache-row doubling for hot
 // queries during a rolling deploy. Clears naturally within
 // `cache.ttl_seconds` (default 3600s). The CHANGELOG note covers this.
-export const KNOBS_HASH_VERSION = 2;
+//
+// v0.36 bump 2→3: cross-modal knobs participate in the cache key (D2). Any
+// search where crossModal / unified_multimodal / llm_intent flipped should
+// land in a distinct cache row — otherwise a text-mode cache hit could
+// silently serve to an image-mode caller.
+export const KNOBS_HASH_VERSION = 3;
 
 export function knobsHash(knobs: ResolvedSearchKnobs): string {
   // Fixed-order key list. Adding a knob here REQUIRES bumping
@@ -348,6 +451,14 @@ export function knobsHash(knobs: ResolvedSearchKnobs): string {
     `rri=${knobs.reranker_top_n_in}`,
     `rro=${knobs.reranker_top_n_out ?? 'none'}`,
     `rrt=${knobs.reranker_timeout_ms}`,
+    // v=3 cross-modal additions (append-only).
+    `cmbt=${knobs.cross_modal_both_text_weight.toFixed(2)}`,
+    `cmbi=${knobs.cross_modal_both_image_weight.toFixed(2)}`,
+    `iqt=${knobs.image_query_text_refinement_weight.toFixed(2)}`,
+    `iqi=${knobs.image_query_image_refinement_weight.toFixed(2)}`,
+    `um=${knobs.unified_multimodal ? 1 : 0}`,
+    `umo=${knobs.unified_multimodal_only ? 1 : 0}`,
+    `lli=${knobs.cross_modal_llm_intent ? 1 : 0}`,
   ];
   const h = createHash('sha256');
   h.update(parts.join('|'));
@@ -435,6 +546,40 @@ export function loadOverridesFromConfig(
     if (Number.isFinite(n) && n > 0) out.reranker_timeout_ms = n;
   }
 
+  // v0.36 cross-modal overrides (D3 registry)
+  const cmbt = get('search.cross_modal.both_mode_text_weight');
+  if (cmbt !== undefined) {
+    const n = parseFloat(cmbt);
+    if (Number.isFinite(n) && n >= 0) out.cross_modal_both_text_weight = n;
+  }
+  const cmbi = get('search.cross_modal.both_mode_image_weight');
+  if (cmbi !== undefined) {
+    const n = parseFloat(cmbi);
+    if (Number.isFinite(n) && n >= 0) out.cross_modal_both_image_weight = n;
+  }
+  const iqt = get('search.image_query.text_refinement_weight');
+  if (iqt !== undefined) {
+    const n = parseFloat(iqt);
+    if (Number.isFinite(n) && n >= 0) out.image_query_text_refinement_weight = n;
+  }
+  const iqi = get('search.image_query.image_refinement_weight');
+  if (iqi !== undefined) {
+    const n = parseFloat(iqi);
+    if (Number.isFinite(n) && n >= 0) out.image_query_image_refinement_weight = n;
+  }
+  const um = get('search.unified_multimodal');
+  if (um !== undefined) {
+    out.unified_multimodal = um === '1' || um.toLowerCase() === 'true';
+  }
+  const umo = get('search.unified_multimodal_only');
+  if (umo !== undefined) {
+    out.unified_multimodal_only = umo === '1' || umo.toLowerCase() === 'true';
+  }
+  const lli = get('search.cross_modal.llm_intent');
+  if (lli !== undefined) {
+    out.cross_modal_llm_intent = lli === '1' || lli.toLowerCase() === 'true';
+  }
+
   return out;
 }
 
@@ -453,6 +598,14 @@ export const SEARCH_MODE_CONFIG_KEYS: ReadonlyArray<string> = Object.freeze([
   'search.reranker.top_n_in',
   'search.reranker.top_n_out',
   'search.reranker.timeout_ms',
+  // v0.36 cross-modal keys (D3)
+  'search.cross_modal.both_mode_text_weight',
+  'search.cross_modal.both_mode_image_weight',
+  'search.image_query.text_refinement_weight',
+  'search.image_query.image_refinement_weight',
+  'search.unified_multimodal',
+  'search.unified_multimodal_only',
+  'search.cross_modal.llm_intent',
 ]);
 
 /**
