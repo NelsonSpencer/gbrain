@@ -68,6 +68,7 @@ export {
 export {
   EXTENDS_DEPTH_WARN,
   EXTENDS_DEPTH_HARD_CAP,
+  STAT_TTL_MS_DEFAULT,
   ExtendsChainTooDeepError,
   UnknownPackError,
   type ResolvedPack,
@@ -75,7 +76,11 @@ export {
   type ResolutionResult,
   resolveActivePackName,
   resolvePack,
+  tryCachedPack,
+  invalidatePackCache,
   _resetPackCacheForTests,
+  _cacheSizeForTests,
+  _cacheNamesForTests,
 } from './registry.ts';
 
 export {
@@ -112,3 +117,33 @@ export {
   enrichableTypesFromPack,
   rubricNameForType,
 } from './enrichable.ts';
+
+// v0.40.6.0 Schema Cathedral v3 surface:
+export { loadActivePackBestEffort } from './best-effort.ts';
+
+export {
+  type MutationOp,
+  type MutationActor,
+  type MutationOutcome,
+  type MutationAuditRecord,
+  type LogMutationOpts,
+  type LogMutationFailureOpts,
+  type MutationSummary,
+  computeMutateAuditPath,
+  logMutationSuccess,
+  logMutationFailure,
+  readRecentMutations,
+  summarizeMutations,
+} from './mutate-audit.ts';
+
+export {
+  DEFAULT_LOCK_TTL_MS,
+  REFRESH_INTERVAL_MS,
+  type LockOutcome,
+  type PackLockOpts,
+  type LockFileRecord,
+  PackLockBusyError,
+  isLockStale,
+  acquirePackLock,
+  withPackLock,
+} from './pack-lock.ts';
