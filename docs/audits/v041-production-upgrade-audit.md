@@ -7,12 +7,44 @@
 
 ---
 
+**Snapshot:** taken at v0.41.2.0 (commit ca68633f).
+**Revalidated against:** v0.41.7.0 HEAD on 2026-05-25.
+
+This is a new convention for `docs/audits/` — the directory has no prior
+precedent. Future audits in this directory should follow the same snapshot +
+revalidation pattern so readers can tell at a glance what's still
+load-bearing.
+
+Findings are observations from a single production upgrade; severity tags
+reflect impact at time of audit. Several gaps below are independently
+re-derived from existing TODOS.md entries — inline cross-refs added during
+revalidation. Cross-refs use stable TODO headings rather than line numbers
+because line numbers rot on the next TODOS.md edit.
+
+The original snapshot reported a third critical issue ("`gbrain doctor`
+crashes with `s.toLowerCase`"). On revalidation, no `.toLowerCase()` site
+in `src/core/calibration/*.ts` or `src/commands/doctor.ts` matches the
+proposed root cause (each is guarded by a `typeof` check or `Array.isArray`
+filter). The original report itself used "likely" and offered no stack
+trace. That finding was removed from this snapshot rather than carried
+forward as an unverified critical issue. If the symptom resurfaces with a
+real stack trace, please file a fresh issue against the version it hits
+rather than amending this snapshot.
+
+Use-case-specific page types and calibration domain names in the audit
+examples below have been replaced with placeholder `domain-a-*` /
+`domain-b-*` strings; the original audit was taken against a brain with a
+specific real-world taxonomy that's not relevant to the findings.
+
+---
+
 ## Executive Summary
 
-After upgrading a production brain from v0.29-era to v0.41.2, a comprehensive audit
-found **3 critical issues** and **8 features that require manual activation** despite
-being available in the codebase. The brain itself is healthy (100% embedded, schema
-pack active), but the automation and calibration layers are largely dormant.
+After upgrading a production brain from v0.29-era to v0.41.2, a comprehensive
+audit found **2 critical issues** and **8 features that require manual
+activation** despite being available in the codebase. The brain itself is
+healthy (100% embedded, schema pack active), but the automation and
+calibration layers are largely dormant.
 
 ---
 
@@ -72,18 +104,17 @@ env var is set, forcing all traffic through the pooler.
 - Document Supabase pooler idle timeout behavior and `GBRAIN_DISABLE_DIRECT_POOL` interaction
 - Consider: should the dream cycle use a direct connection (port 5432) instead of the pooler for long-running maintenance?
 
-### 2. `gbrain doctor` crashes on v0.41.2
+**Status on revalidation (v0.41.7.0):** still active. `PostgresEngine.reconnect()`
+exists at `src/core/postgres-engine.ts:4137` but is supervisor-driven only;
+`src/core/cycle.ts` never calls it between phases, and `src/commands/extract.ts:535-540`
+catches batch errors and reports "rows lost" with no retry. Filed as a new
+TODOS.md entry (stable heading: `v0.41.x+: Dream cycle reconnect-between-phases`)
+which enumerates 4 design options + per-phase idempotency audit before
+implementation, because picking the right reconnect strategy (phase-boundary
+ping vs reconnect-on-specific-errors vs direct-connection vs bounded batch
+retry) is real architecture work that this audit doesn't decide.
 
-```
-$ gbrain doctor
-undefined is not an object (evaluating 's.toLowerCase')
-```
-
-Doctor worked fine on v0.41.0 before the upgrade to v0.41.2. Likely a regression
-in the `take_domain_assignments` migration or the new domain-aggregator code path
-when no `calibration_domains` are declared in the active schema pack.
-
-### 3. Minion worker has no startup/supervision story
+### 2. `queue_health` doctor check misses "waiting jobs, no live worker"
 
 Job id 2 (`sync`) has been in `waiting` status since 2026-05-20 — 5 days with no worker
 to process it:
@@ -94,11 +125,33 @@ Job Stats (last 24h):
   Queue health: 1 waiting, 0 active, 0 stalled
 ```
 
-There's no:
-- `gbrain autopilot` documentation for ensuring the worker runs persistently
-- Systemd unit / launchd plist / Docker entrypoint example
-- Crash-restart wrapper for `gbrain jobs work`
-- The healthcheck cron mentioned in docs doesn't exist as a default — operators have to create it manually
+**The original audit framed this as "Minion worker has no supervision story."**
+That framing is wrong: `gbrain jobs supervisor` is a first-class CLI
+crash-restart wrapper (`src/commands/jobs.ts:141`), documented at
+`docs/guides/minions-deployment.md` with PID file + exponential backoff +
+lifecycle events + systemd snippet (`docs/guides/minions-deployment-snippets/systemd.service`)
++ fly.toml partial + Procfile. `gbrain autopilot` spawns **`gbrain jobs work`**
+as a child via `ChildWorkerSupervisor` at `src/commands/autopilot.ts:192` — not
+`gbrain jobs supervisor`; the two are distinct lifecycle paths.
+
+**The actual gap is twofold:**
+
+- **Discoverability.** An operator hitting a stuck queue won't find the answer
+  unless they grep `docs/guides/`. The supervision story exists; the discovery
+  path doesn't.
+- **Detection.** gbrain has two doctor checks here that split coverage
+  incompletely. `queue_health` (at `src/commands/doctor.ts:4395-4505`) checks
+  stalled-active jobs / waiting-depth-per-name / RSS-watchdog-kills /
+  prompt_too_long terminal failures, but does NOT detect "waiting jobs with no
+  live worker." A separate `supervisor` check (at `src/commands/doctor.ts:2448`)
+  fires only when a supervisor was previously observed — for
+  never-installed/unknown workers, neither check fires. The stuck job above
+  would be flagged by neither.
+
+**Already filed:** TODOS.md `B7 minion_workers heartbeat table for queue_health
+doctor` (stable heading). The heartbeat table would give doctor a ground-truth
+signal for "is a worker actually running" instead of inferring it from
+side-channel observations.
 
 ---
 
@@ -125,18 +178,18 @@ There's no:
 The `take_domain_assignments` migration creates the table but it stays empty without
 `calibration_domains` in the schema pack manifest.
 
-**What's needed:** Add to pack.yaml:
+**What's needed:** Add to pack.yaml (example uses placeholder domain names):
 ```yaml
 calibration_domains:
-  - name: local_politics
+  - name: domain_a_realtime
     aggregator: scalar_brier
-    page_types: [civic-incident, civic-article, civic-policy]
-  - name: state_politics
+    page_types: [domain-a-event, domain-a-article, domain-b-policy]
+  - name: domain_a_aggregate
     aggregator: weighted_brier
-    page_types: [civic-policy, civic-election]
-  - name: entity_assessment
+    page_types: [domain-b-policy, domain-b-election]
+  - name: domain_b_assessment
     aggregator: count_based
-    page_types: [civic-adversary]
+    page_types: [domain-b-entity]
 ```
 
 **Gap:** No `gbrain schema add-domain` CLI command. Operators must hand-edit YAML
@@ -185,9 +238,15 @@ eval baselines.
 - Self-fix remediation
 - Any future async pipeline
 
-**Gap:** No `gbrain autopilot --install` for the worker (only for the dream cycle).
-No healthcheck that detects "worker should be running but isn't." Doctor's
-`queue_health` check only flags stalled jobs, not a missing worker with waiting jobs.
+**Gap (revised on revalidation):** the supervision story exists but is
+under-discoverable. `gbrain jobs supervisor` (`src/commands/jobs.ts:141`) wraps
+`gbrain jobs work` with PID file + exponential backoff + lifecycle events;
+`docs/guides/minions-deployment.md` covers systemd / fly.toml / Procfile
+deployment shapes; `gbrain autopilot` already spawns `gbrain jobs work` as a
+child via `ChildWorkerSupervisor` (`src/commands/autopilot.ts:192`). What's
+missing is detection: doctor's `queue_health` doesn't flag "waiting jobs with
+no live worker" (see Critical Issue #2). `Already filed:` TODOS.md `B7
+minion_workers heartbeat table for queue_health doctor`.
 
 #### 6. Code intelligence (v0.33-v0.34, v0.40.9)
 
@@ -234,8 +293,19 @@ checks health but doesn't advise on feature activation. Suggested additions:
 - `[SUGGEST] calibration_domains not declared — run gbrain schema add-domain to enable per-topic accuracy tracking`
 - `[SUGGEST] nightly quality probe disabled — gbrain config set autopilot.nightly_quality_probe.enabled true (~$10/mo)`
 - `[SUGGEST] no eval baseline published — run gbrain bench publish to protect search quality`
-- `[SUGGEST] no worker running but 1 job waiting — start gbrain jobs work`
 - `[SUGGEST] custom pack missing phases field — consider adding extract_atoms, synthesize_concepts`
+
+Note: "no worker running but N jobs waiting" deliberately omitted from this
+list — it's an operational warn/fail signal, not optional advice, and belongs
+in `queue_health` rather than a SUGGEST tier. Filed as TODOS.md `B7
+minion_workers heartbeat table for queue_health doctor` rather than the
+SUGGEST framework.
+
+**Already filed on revalidation:** the SUGGEST framework decision is split
+into two TODOs (stable headings: `v0.41.x+: Doctor [SUGGEST] tier — framework
+design` and `v0.41.x+: Doctor [SUGGEST] tier — initial suggestion list`). The
+framework TODO covers taxonomy + JSON shape + suppression model + scoring +
+SUGGEST/WARN boundary rule before any specific suggestions land.
 
 ### Connection resilience for long-running operations
 
@@ -244,23 +314,37 @@ Postgres (Supabase, Neon, etc.) with transaction poolers, connections drop after
 timeouts. Long filesystem-scanning phases (extract on a 16K-page brain) create gaps
 where no queries run, triggering pooler eviction.
 
+`Related TODO:` `extract.ts N+1 reads over Supabase pooler` (same Supabase
+pooler topology theme; different bug class — read-side N+1 vs write-side
+reconnect).
+
 ---
 
 ## Recommended Changes (Prioritized)
 
 ### P0 — Fix broken things
-1. **Fix dream cycle connection resilience** — reconnect between phases or on batch error
-2. **Fix doctor crash on v0.41.2** — likely null-safety issue in domain aggregator path when no domains declared
+1. **Fix dream cycle connection resilience** — reconnect between phases or on
+   batch error. **Filed on revalidation** as TODOS.md `v0.41.x+: Dream cycle
+   reconnect-between-phases — design needed before implementation` with 4
+   design options + per-phase idempotency audit requirement.
 
 ### P1 — Improve upgrade experience
-3. **Add `gbrain doctor` suggestions for unused features** — make doctor the upgrade advisor
-4. **Document calibration_domains aggregator enum** — operators can't configure what they can't discover
-5. **Add worker supervision story** — `gbrain autopilot --install` should optionally also install the worker
+2. **Add `gbrain doctor` suggestions for unused features** — make doctor the
+   upgrade advisor. **Filed on revalidation** as two TODOs: `v0.41.x+: Doctor
+   [SUGGEST] tier — framework design` (taxonomy + suppression model + boundary
+   rule with WARN) and `v0.41.x+: Doctor [SUGGEST] tier — initial suggestion
+   list` (blocked by the framework TODO).
+3. **Document calibration_domains aggregator enum** — operators can't
+   configure what they can't discover.
+4. **Surface worker absence via `queue_health` doctor check** — pair the
+   already-existing `gbrain jobs supervisor` discoverability with a real
+   doctor signal (see Critical Issue #2 + TODOS.md `B7 minion_workers
+   heartbeat table for queue_health doctor`).
 
 ### P2 — Feature activation
-6. **`gbrain schema review-candidates` should suggest phases + calibration_domains** for custom packs
-7. **Add `gbrain upgrade --changelog` or `gbrain doctor --post-upgrade`** — show what's new after version bump
-8. **Document the Supabase pooler interaction** — idle timeouts, `GBRAIN_DISABLE_DIRECT_POOL`, prepare mode
+5. **`gbrain schema review-candidates` should suggest phases + calibration_domains** for custom packs
+6. **Add `gbrain upgrade --changelog` or `gbrain doctor --post-upgrade`** — show what's new after version bump
+7. **Document the Supabase pooler interaction** — idle timeouts, `GBRAIN_DISABLE_DIRECT_POOL`, prepare mode
 
 ---
 
