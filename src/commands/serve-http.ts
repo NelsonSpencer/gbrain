@@ -2120,7 +2120,54 @@ ${suppressBootstrapPrint
   });
 
   await new Promise<void>((resolve, reject) => {
-    server.once('close', resolve);
-    server.once('error', reject);
+    let shuttingDown = false;
+    let settled = false;
+
+    const cleanup = () => {
+      server.off('close', onClose);
+      server.off('error', onError);
+      process.off('SIGTERM', onSigterm);
+      process.off('SIGINT', onSigint);
+    };
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const fail = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(err);
+    };
+    const shutdown = (signal: string) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      console.error(`[serve-http] received ${signal}; shutting down`);
+      server.close((err?: Error) => {
+        if (err) fail(err);
+        else finish();
+      });
+    };
+    function onClose() {
+      if (!shuttingDown) {
+        fail(new Error('HTTP server closed unexpectedly'));
+      }
+    }
+    function onError(err: Error) {
+      fail(err);
+    }
+    function onSigterm() {
+      shutdown('SIGTERM');
+    }
+    function onSigint() {
+      shutdown('SIGINT');
+    }
+
+    server.once('close', onClose);
+    server.once('error', onError);
+    process.once('SIGTERM', onSigterm);
+    process.once('SIGINT', onSigint);
   });
 }
