@@ -38,6 +38,18 @@ function home(): string { return process.env.HOME || ''; }
 function gbrainDir(): string { return join(home(), '.gbrain'); }
 function pendingHostWorkPath(): string { return join(gbrainDir(), 'migrations', 'pending-host-work.jsonl'); }
 
+function resolveGbrainBin(): string {
+  // Use the same binary that invoked us (works in compiled bun builds where
+  // process.argv[0] is the absolute path to the compiled executable).
+  const self = process.argv[0];
+  if (self && existsSync(self)) return self;
+  // Fallback: check common compiled output location.
+  const compiled = join(process.cwd(), 'bin', 'gbrain');
+  if (existsSync(compiled)) return compiled;
+  // Last resort: bare command (relies on PATH).
+  return 'gbrain';
+}
+
 export interface PendingHostWorkEntry {
   type: 'cron-handler-needs-host-registration' | 'agents-md-dispatcher-needs-host-review';
   status: 'pending' | 'complete';
@@ -82,7 +94,8 @@ async function phaseASchema(opts: OrchestratorOpts): Promise<OrchestratorPhaseRe
 function phaseBSmoke(opts: OrchestratorOpts): OrchestratorPhaseResult {
   if (opts.dryRun) return { name: 'smoke', status: 'skipped', detail: 'dry-run' };
   try {
-    execSync('gbrain jobs smoke', { stdio: 'inherit', timeout: 30_000, env: process.env });
+    const bin = resolveGbrainBin();
+    execSync(`${bin} jobs smoke`, { stdio: 'inherit', timeout: 30_000, env: process.env });
     return { name: 'smoke', status: 'complete' };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -403,7 +416,8 @@ function phaseFInstall(opts: OrchestratorOpts): OrchestratorPhaseResult {
   if (opts.dryRun) return { name: 'install', status: 'skipped', detail: 'dry-run' };
   if (opts.noAutopilotInstall) return { name: 'install', status: 'skipped', detail: '--no-autopilot-install' };
   try {
-    execSync('gbrain autopilot --install --yes', { stdio: 'inherit', timeout: 60_000, env: process.env });
+    const bin = resolveGbrainBin();
+    execSync(`${bin} autopilot --install --yes`, { stdio: 'inherit', timeout: 60_000, env: process.env });
     return { name: 'install', status: 'complete' };
   } catch (e) {
     // Install is best-effort — log but don't fail the whole migration. User
