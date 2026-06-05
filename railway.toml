@@ -1,0 +1,3 @@
+[deploy]
+startCommand = "./bin/gbrain serve --http --bind 0.0.0.0 --port ${PORT:-8080} --public-url ${PUBLIC_URL}"
+healthcheckPath = "/health"
