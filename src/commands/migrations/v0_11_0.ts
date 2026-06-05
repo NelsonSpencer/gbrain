@@ -54,6 +54,33 @@ export interface PendingHostWorkEntry {
 }
 
 // -----------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------
+
+/**
+ * Resolves the gbrain binary path for execSync calls.
+ * On Railway/Railpack, the compiled binary is at /app/bin/gbrain.
+ * process.argv[0] often points to the absolute path of the running bun binary.
+ */
+function resolveGbrainBin(): string {
+  // If we are running in the compiled binary, argv[0] is the path to gbrain.
+  if (process.argv[0].endsWith('/gbrain')) return process.argv[0];
+  // Fallback for Railway/container environments.
+  if (existsSync('/app/bin/gbrain')) return '/app/bin/gbrain';
+  // Fallback to bare command.
+  return 'gbrain';
+}
+
+function getMigrationEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  // Ensure /app/bin is on PATH if it exists (Railway/Railpack convention).
+  if (existsSync('/app/bin')) {
+    env.PATH = `/app/bin:${env.PATH || ''}`;
+  }
+  return env;
+}
+
+// -----------------------------------------------------------------------
 // Phase A — Schema
 // -----------------------------------------------------------------------
 
@@ -82,7 +109,8 @@ async function phaseASchema(opts: OrchestratorOpts): Promise<OrchestratorPhaseRe
 function phaseBSmoke(opts: OrchestratorOpts): OrchestratorPhaseResult {
   if (opts.dryRun) return { name: 'smoke', status: 'skipped', detail: 'dry-run' };
   try {
-    execSync('gbrain jobs smoke', { stdio: 'inherit', timeout: 30_000, env: process.env });
+    const bin = resolveGbrainBin();
+    execSync(`${bin} jobs smoke`, { stdio: 'inherit', timeout: 30_000, env: getMigrationEnv() });
     return { name: 'smoke', status: 'complete' };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -262,6 +290,8 @@ function rewriteCronManifest(
     enginePglite = cfg?.engine === 'pglite';
   } catch { /* best-effort */ }
 
+  const bin = resolveGbrainBin();
+
   for (const rawEntry of entries) {
     if (!rawEntry || typeof rawEntry !== 'object') continue;
     const entry = rawEntry as Record<string, unknown>;
@@ -280,10 +310,10 @@ function rewriteCronManifest(
       // Rewrite to shell + gbrain jobs submit.
       let cmd: string;
       if (enginePglite) {
-        cmd = `gbrain jobs submit ${handler} --params '{}' --follow`;
+        cmd = `${bin} jobs submit ${handler} --params '{}' --follow`;
       } else {
         // slot computed via date(1). Host scheduler evaluates shell.
-        cmd = `gbrain jobs submit ${handler} --params '{"slot":"$(date -u +%Y-%m-%dT%H:%M)"}' --idempotency-key ${handler}:$(date -u +%Y-%m-%dT%H:%M)`;
+        cmd = `${bin} jobs submit ${handler} --params '{"slot":"$(date -u +%Y-%m-%dT%H:%M)"}' --idempotency-key ${handler}:$(date -u +%Y-%m-%dT%H:%M)`;
       }
       entry.kind = 'shell';
       entry.cmd = cmd;
@@ -403,7 +433,8 @@ function phaseFInstall(opts: OrchestratorOpts): OrchestratorPhaseResult {
   if (opts.dryRun) return { name: 'install', status: 'skipped', detail: 'dry-run' };
   if (opts.noAutopilotInstall) return { name: 'install', status: 'skipped', detail: '--no-autopilot-install' };
   try {
-    execSync('gbrain autopilot --install --yes', { stdio: 'inherit', timeout: 60_000, env: process.env });
+    const bin = resolveGbrainBin();
+    execSync(`${bin} autopilot --install --yes`, { stdio: 'inherit', timeout: 60_000, env: getMigrationEnv() });
     return { name: 'install', status: 'complete' };
   } catch (e) {
     // Install is best-effort — log but don't fail the whole migration. User
