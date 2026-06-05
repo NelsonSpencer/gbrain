@@ -2093,7 +2093,7 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
   // ---------------------------------------------------------------------------
   const clientCount = await sql`SELECT count(*)::int as count FROM oauth_clients`;
 
-  app.listen(port, bind, () => {
+  const server = app.listen(port, bind, () => {
     console.error(`
 ╔══════════════════════════════════════════════════════╗
 ║  GBrain MCP Server v${VERSION.padEnd(37)}║
@@ -2117,5 +2117,10 @@ ${suppressBootstrapPrint
     ? '║  Admin Token: from $GBRAIN_ADMIN_BOOTSTRAP_TOKEN     ║\n╚══════════════════════════════════════════════════════╝'
     : `║  Admin Token (paste into /admin login):              ║\n║  ${bootstrapToken.substring(0, 50)}  ║\n║  ${bootstrapToken.substring(50).padEnd(50)}  ║\n╚══════════════════════════════════════════════════════╝`}
 `);
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('close', resolve);
+    server.once('error', reject);
   });
 }
